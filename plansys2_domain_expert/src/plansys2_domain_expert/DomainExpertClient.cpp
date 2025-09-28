@@ -61,6 +61,43 @@ DomainExpertClient::DomainExpertClient()
     "domain_expert/get_domain_durative_action_details");
 }
 
+DomainExpertClient::DomainExpertClient(rclcpp::Node::SharedPtr node)
+: node_(node)
+{
+  get_domain_client_ = node_->create_client<plansys2_msgs::srv::GetDomain>(
+    "domain_expert/get_domain");
+  get_name_client_ = node_->create_client<plansys2_msgs::srv::GetDomainName>(
+    "domain_expert/get_domain_name");
+  get_types_client_ = node_->create_client<plansys2_msgs::srv::GetDomainTypes>(
+    "domain_expert/get_domain_types");
+  get_constants_client_ = node_->create_client<plansys2_msgs::srv::GetDomainConstants>(
+    "domain_expert/get_domain_constants");
+  get_predicates_client_ = node_->create_client<plansys2_msgs::srv::GetStates>(
+    "domain_expert/get_domain_predicates");
+  get_functions_client_ = node_->create_client<plansys2_msgs::srv::GetStates>(
+    "domain_expert/get_domain_functions");
+  get_derived_predicates_client_ = node_->create_client<plansys2_msgs::srv::GetStates>(
+    "domain_expert/get_domain_derived_predicates");
+  get_derived_predicate_details_client_ =
+    node_->create_client<plansys2_msgs::srv::GetDomainDerivedPredicateDetails>(
+    "domain_expert/get_domain_derived_predicate_details");
+  get_actions_client_ = node_->create_client<plansys2_msgs::srv::GetDomainActions>(
+    "domain_expert/get_domain_actions");
+  get_durative_actions_client_ = node_->create_client<plansys2_msgs::srv::GetDomainActions>(
+    "domain_expert/get_domain_durative_actions");
+  get_predicate_details_client_ =
+    node_->create_client<plansys2_msgs::srv::GetNodeDetails>(
+    "domain_expert/get_domain_predicate_details");
+  get_function_details_client_ =
+    node_->create_client<plansys2_msgs::srv::GetNodeDetails>(
+    "domain_expert/get_domain_function_details");
+  get_action_details_client_ = node_->create_client<plansys2_msgs::srv::GetDomainActionDetails>(
+    "domain_expert/get_domain_action_details");
+  get_durative_action_details_client_ =
+    node_->create_client<plansys2_msgs::srv::GetDomainDurativeActionDetails>(
+    "domain_expert/get_domain_durative_action_details");
+}
+
 std::string
 DomainExpertClient::getName()
 {

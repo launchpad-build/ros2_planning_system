@@ -50,6 +50,10 @@ public:
     const std::string & bt_action_2 = "",
     int precision = 3);
 
+  void setClients(
+    std::shared_ptr<plansys2::DomainExpertClient> domain_client,
+    std::shared_ptr<plansys2::ProblemExpertClient> problem_client) override;
+
   std::string get_tree(const plansys2_msgs::msg::Plan & current_plan);
   Graph::Ptr get_graph() {return stn_;}
   bool propagate(const Graph::Ptr stn);

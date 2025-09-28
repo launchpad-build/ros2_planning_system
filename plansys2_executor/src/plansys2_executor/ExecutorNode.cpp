@@ -103,6 +103,18 @@ ExecutorNode::ExecutorNode()
       std::placeholders::_3));
 }
 
+ExecutorNode::ExecutorNode(
+  std::shared_ptr<plansys2::DomainExpertClient> domain_client,
+  std::shared_ptr<plansys2::ProblemExpertClient> problem_client,
+  std::shared_ptr<plansys2::PlannerClient> planner_client)
+: ExecutorNode()  // Delegate to default constructor
+{
+  // Override the clients created by the default constructor
+  domain_client_ = domain_client;
+  problem_client_ = problem_client;
+  planner_client_ = planner_client;
+}
+
 
 using CallbackReturnT =
   rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
@@ -171,9 +183,15 @@ ExecutorNode::on_configure(const rclcpp_lifecycle::State & state)
   executing_plan_pub_ = create_publisher<plansys2_msgs::msg::Plan>(
     "executing_plan", rclcpp::QoS(100).transient_local());
 
-  domain_client_ = std::make_shared<plansys2::DomainExpertClient>();
-  problem_client_ = std::make_shared<plansys2::ProblemExpertClient>();
-  planner_client_ = std::make_shared<plansys2::PlannerClient>();
+  if (!domain_client_) {
+    domain_client_ = std::make_shared<plansys2::DomainExpertClient>();
+  }
+  if (!problem_client_) {
+    problem_client_ = std::make_shared<plansys2::ProblemExpertClient>();
+  }
+  if (!planner_client_) {
+    planner_client_ = std::make_shared<plansys2::PlannerClient>();
+  }
 
   RCLCPP_INFO(get_logger(), "[%s] Configured", get_name());
   return CallbackReturnT::SUCCESS;
@@ -382,7 +400,7 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
     (*action_map)[index] = ActionExecutionInfo();
     (*action_map)[index].action_executor =
       ActionExecutor::make_shared(plan_item.action, shared_from_this());
-
+        
     auto actions = domain_client_->getActions();
     std::string action_name_ = get_action_name(plan_item.action);
     if (std::find(actions.begin(), actions.end(), action_name_) != actions.end()) {
@@ -417,10 +435,18 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
 
   std::shared_ptr<plansys2::BTBuilder> bt_builder;
   try {
+    RCLCPP_INFO(
+      get_logger(), "Before bt");
     bt_builder = bt_builder_loader_.createSharedInstance("plansys2::" + bt_builder_plugin);
+    RCLCPP_INFO(
+      get_logger(), "After bt built new");
+    
+    // Set existing clients to prevent duplicates
+    bt_builder->setClients(domain_client_, problem_client_);
   } catch (pluginlib::PluginlibException & ex) {
     RCLCPP_ERROR(get_logger(), "pluginlib error: %s", ex.what());
   }
+
 
   if (bt_builder_plugin == "SimpleBTBuilder") {
     bt_builder->initialize(action_bt_xml_);

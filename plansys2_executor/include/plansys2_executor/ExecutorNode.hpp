@@ -55,6 +55,10 @@ public:
     rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
   ExecutorNode();
+  ExecutorNode(
+    std::shared_ptr<plansys2::DomainExpertClient> domain_client,
+    std::shared_ptr<plansys2::ProblemExpertClient> problem_client,
+    std::shared_ptr<plansys2::PlannerClient> planner_client);
 
   CallbackReturnT on_configure(const rclcpp_lifecycle::State & state);
   CallbackReturnT on_activate(const rclcpp_lifecycle::State & state);
@@ -72,6 +76,8 @@ public:
     const std::shared_ptr<rmw_request_id_t> request_header,
     const std::shared_ptr<plansys2_msgs::srv::GetPlan::Request> request,
     const std::shared_ptr<plansys2_msgs::srv::GetPlan::Response> response);
+
+  
 
 protected:
   bool cancel_plan_requested_;

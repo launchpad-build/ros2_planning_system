@@ -26,6 +26,11 @@
 #include "plansys2_msgs/msg/plan.hpp"
 #include "plansys2_pddl_parser/Utils.hpp"
 
+namespace plansys2 {
+  class DomainExpertClient;
+  class ProblemExpertClient;
+}
+
 namespace plansys2
 {
 
@@ -92,6 +97,10 @@ public:
     std::shared_ptr<std::map<std::string, ActionExecutionInfo>> action_map,
     bool enable_legend = false,
     bool enable_print_graph = false) = 0;
+
+  virtual void setClients(
+    std::shared_ptr<plansys2::DomainExpertClient> domain_client,
+    std::shared_ptr<plansys2::ProblemExpertClient> problem_client) = 0;
 
   static int to_int_time(float time, int power)
   {

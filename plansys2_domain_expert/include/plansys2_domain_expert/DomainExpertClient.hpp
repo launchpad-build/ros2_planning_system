@@ -55,6 +55,8 @@ class DomainExpertClient : public DomainExpertInterface
 public:
   /// Create a new DomainExpertClient.
   DomainExpertClient();
+  /// Create a new DomainExpertClient using an existing node.
+  explicit DomainExpertClient(rclcpp::Node::SharedPtr node);
 
   /// Get the domain name.
   /**
