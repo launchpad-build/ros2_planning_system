@@ -52,10 +52,10 @@ WaitAtStartReq::tick()
   if (!check_as) {
     (*action_map_)[action].execution_error_info = "Error checking at start reqs";
 
-    RCLCPP_ERROR_STREAM(
-      node->get_logger(),
-      "[" << action << "]" << (*action_map_)[action].execution_error_info << ": " <<
-        parser::pddl::toString(reqs_as));
+    RCLCPP_INFO_THROTTLE(
+      node->get_logger(), *node->get_clock(), 1000,
+      "[WaitAtStartReq] [%s] waiting on at-start reqs: %s",
+      action.c_str(), parser::pddl::toString(reqs_as).c_str());
 
     return BT::NodeStatus::RUNNING;
   }
@@ -64,13 +64,18 @@ WaitAtStartReq::tick()
   if (!check_oa) {
     (*action_map_)[action].execution_error_info = "Error checking over all reqs";
 
-    RCLCPP_ERROR_STREAM(
-      node->get_logger(),
-      "[" << action << "]" << (*action_map_)[action].execution_error_info << ": " <<
-        parser::pddl::toString(reqs_oa));
+    RCLCPP_INFO_THROTTLE(
+      node->get_logger(), *node->get_clock(), 1000,
+      "[WaitAtStartReq] [%s] waiting on over-all reqs: %s",
+      action.c_str(), parser::pddl::toString(reqs_oa).c_str());
 
     return BT::NodeStatus::RUNNING;
   }
+
+  RCLCPP_INFO(
+    node->get_logger(),
+    "[WaitAtStartReq] [%s] node=%s ns=%s all reqs satisfied",
+    action.c_str(), node->get_name(), node->get_namespace());
 
   return BT::NodeStatus::SUCCESS;
 }

@@ -67,8 +67,16 @@ ActionExecutor::action_hub_callback(const plansys2_msgs::msg::ActionExecution::S
           waiting_timer_ = nullptr;
           start_execution_ = node_->now();
           state_time_ = node_->now();
+          RCLCPP_INFO(
+            node_->get_logger(),
+            "[ActionExecutor] [%s] DEALING -> RUNNING, performer: %s",
+            action_.c_str(), msg->node_id.c_str());
         } else {
           reject_performer(msg->node_id);
+          RCLCPP_INFO(
+            node_->get_logger(),
+            "[ActionExecutor] [%s] rejecting performer %s (state=%d)",
+            action_.c_str(), msg->node_id.c_str(), static_cast<int>(state_));
         }
       }
       break;
@@ -92,6 +100,12 @@ ActionExecutor::action_hub_callback(const plansys2_msgs::msg::ActionExecution::S
         } else {
           state_ = FAILURE;
         }
+
+        RCLCPP_INFO(
+          node_->get_logger(),
+          "[ActionExecutor] [%s] RUNNING -> %s, performer: %s, status: %s",
+          action_.c_str(), msg->success ? "SUCCESS" : "FAILURE",
+          msg->node_id.c_str(), msg->status.c_str());
 
         feedback_ = msg->status;
         completion_ = msg->completion;
@@ -192,6 +206,11 @@ ActionExecutor::tick(const rclcpp::Time & now)
       request_for_performers();
       waiting_timer_ = node_->create_wall_timer(
         1s, std::bind(&ActionExecutor::wait_timeout, this));
+
+      RCLCPP_INFO(
+        node_->get_logger(),
+        "[ActionExecutor] [%s] IDLE -> DEALING, requesting performer",
+        action_.c_str());
       break;
     case DEALING:
       {

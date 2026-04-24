@@ -50,13 +50,26 @@ CheckAtEndReq::tick()
 
   auto reqs = (*action_map_)[action].action_info.get_at_end_requirements();
 
-  if (!check(reqs, problem_client_)) {
+  auto t0 = node->now();
+  bool ok = check(reqs, problem_client_);
+  double elapsed_ms = (node->now() - t0).seconds() * 1000.0;
+
+  if (elapsed_ms > 200.0) {
+    RCLCPP_WARN(
+      node->get_logger(),
+      "[CheckAtEndReq] [%s] slow check: %.1f ms result=%s node=%s ns=%s",
+      action.c_str(), elapsed_ms, ok ? "PASS" : "FAIL",
+      node->get_name(), node->get_namespace());
+  }
+
+  if (!ok) {
     (*action_map_)[action].execution_error_info = "Error checking at end requirements";
 
-    RCLCPP_ERROR_STREAM(
+    RCLCPP_ERROR(
       node->get_logger(),
-      "[" << action << "]" << (*action_map_)[action].execution_error_info << ": " <<
-        parser::pddl::toString(reqs));
+      "[CheckAtEndReq] [%s] FAILED — node=%s ns=%s elapsed=%.1f ms reqs=%s",
+      action.c_str(), node->get_name(), node->get_namespace(),
+      elapsed_ms, parser::pddl::toString(reqs).c_str());
 
     return BT::NodeStatus::FAILURE;
   } else {

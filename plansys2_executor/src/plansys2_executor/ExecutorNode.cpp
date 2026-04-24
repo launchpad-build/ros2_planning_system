@@ -459,6 +459,12 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
   }
 
   auto bt_xml_tree = bt_builder->get_tree(current_plan_.value());
+
+  RCLCPP_INFO(
+    get_logger(),
+    "[ExecutorNode] node=%s ns=%s generated BT:\n%s",
+    get_name(), get_namespace(), bt_xml_tree.c_str());
+
   if (bt_xml_tree.empty()) {
     RCLCPP_ERROR(get_logger(), "Error computing behavior tree!");
 

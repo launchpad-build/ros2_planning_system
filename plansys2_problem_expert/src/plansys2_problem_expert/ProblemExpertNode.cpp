@@ -385,6 +385,9 @@ ProblemExpertNode::add_problem_predicate_service_callback(
   } else {
     response->success = problem_expert_->addPredicate(request->node);
     if (response->success) {
+      RCLCPP_INFO(
+        get_logger(), "[ProblemExpert] ADD predicate: %s  node=%s ns=%s",
+        parser::pddl::toString(request->node).c_str(), get_name(), get_namespace());
       update_pub_->publish(std_msgs::msg::Empty());
       knowledge_pub_->publish(*get_knowledge_as_msg());
     } else {
@@ -660,6 +663,9 @@ ProblemExpertNode::remove_problem_predicate_service_callback(
   } else {
     response->success = problem_expert_->removePredicate(request->node);
     if (response->success) {
+      RCLCPP_INFO(
+        get_logger(), "[ProblemExpert] REMOVE predicate: %s  node=%s ns=%s",
+        parser::pddl::toString(request->node).c_str(), get_name(), get_namespace());
       update_pub_->publish(std_msgs::msg::Empty());
       knowledge_pub_->publish(*get_knowledge_as_msg());
     } else {
