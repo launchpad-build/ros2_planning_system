@@ -133,6 +133,7 @@ CallbackReturnT
 PlannerNode::on_cleanup(const rclcpp_lifecycle::State & state)
 {
   RCLCPP_INFO(get_logger(), "[%s] Cleaning up...", get_name());
+  solvers_.clear();
   RCLCPP_INFO(get_logger(), "[%s] Cleaned up", get_name());
 
   return CallbackReturnT::SUCCESS;
