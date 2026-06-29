@@ -73,6 +73,12 @@ int main(int argc, char ** argv)
   }
 
   exe.spin();
+
+  executor_node.reset();
+  planner_node.reset();
+  problem_node.reset();
+  domain_node.reset();
+
   rclcpp::shutdown();
   return 0;
 }
