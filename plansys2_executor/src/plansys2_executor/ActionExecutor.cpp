@@ -49,6 +49,7 @@ ActionExecutor::ActionExecutor(
 void
 ActionExecutor::action_hub_callback(const plansys2_msgs::msg::ActionExecution::SharedPtr msg)
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   last_msg = *msg;
 
   switch (msg->type) {
@@ -64,10 +65,9 @@ ActionExecutor::action_hub_callback(const plansys2_msgs::msg::ActionExecution::S
           confirm_performer(msg->node_id);
           current_performer_id_ = msg->node_id;
           state_ = RUNNING;
-          waiting_timer_ = nullptr;
           start_execution_ = node_->now();
           state_time_ = node_->now();
-        } else {
+        } else if (state_ == RUNNING && msg->node_id != current_performer_id_) {
           reject_performer(msg->node_id);
         }
       }
@@ -84,7 +84,7 @@ ActionExecutor::action_hub_callback(const plansys2_msgs::msg::ActionExecution::S
 
       break;
     case plansys2_msgs::msg::ActionExecution::FINISH:
-      if (msg->arguments == action_params_ &&
+      if (state_ == RUNNING && msg->arguments == action_params_ &&
         msg->action == action_name_ && msg->node_id == current_performer_id_)
       {
         if (msg->success) {
@@ -99,8 +99,6 @@ ActionExecutor::action_hub_callback(const plansys2_msgs::msg::ActionExecution::S
         state_time_ = node_->now();
 
         action_hub_pub_->on_deactivate();
-        action_hub_pub_ = nullptr;
-        action_hub_sub_ = nullptr;
       }
       break;
     default:
@@ -150,6 +148,13 @@ ActionExecutor::request_for_performers()
 BT::NodeStatus
 ActionExecutor::get_status()
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  return get_status_unlocked();
+}
+
+BT::NodeStatus
+ActionExecutor::get_status_unlocked() const
+{
   switch (state_) {
     case IDLE:
       return BT::NodeStatus::IDLE;
@@ -173,12 +178,17 @@ ActionExecutor::get_status()
 bool
 ActionExecutor::is_finished()
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
   return state_ == SUCCESS || state_ == FAILURE;
 }
 
 BT::NodeStatus
 ActionExecutor::tick(const rclcpp::Time & now)
 {
+  (void)now;
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  const auto steady_now = std::chrono::steady_clock::now();
+
   switch (state_) {
     case IDLE:
       state_ = DEALING;
@@ -189,9 +199,8 @@ ActionExecutor::tick(const rclcpp::Time & now)
       completion_ = 0.0;
       feedback_ = "";
 
+      last_request_time_ = steady_now;
       request_for_performers();
-      waiting_timer_ = node_->create_wall_timer(
-        1s, std::bind(&ActionExecutor::wait_timeout, this));
       break;
     case DEALING:
       {
@@ -201,6 +210,13 @@ ActionExecutor::tick(const rclcpp::Time & now)
             node_->get_logger(),
             "Aborting %s. Timeout after requesting for 30 seconds", action_.c_str());
           state_ = FAILURE;
+          state_time_ = node_->now();
+          action_hub_pub_->on_deactivate();
+        } else if (steady_now - last_request_time_ >= 1s) {
+          RCLCPP_WARN(
+            node_->get_logger(), "No action performer for %s. retrying", action_.c_str());
+          last_request_time_ = steady_now;
+          request_for_performers();
         }
       }
       break;
@@ -215,13 +231,25 @@ ActionExecutor::tick(const rclcpp::Time & now)
       break;
   }
 
-  return get_status();
+  return get_status_unlocked();
 }
 
 void
 ActionExecutor::cancel()
 {
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  if (state_ == SUCCESS || state_ == FAILURE || state_ == CANCELLED) {
+    return;
+  }
+
+  const auto previous_state = state_;
   state_ = CANCELLED;
+  state_time_ = node_->now();
+
+  if (previous_state == IDLE) {
+    return;
+  }
+
   plansys2_msgs::msg::ActionExecution msg;
   msg.type = plansys2_msgs::msg::ActionExecution::CANCEL;
   msg.node_id = current_performer_id_;
@@ -229,6 +257,7 @@ ActionExecutor::cancel()
   msg.arguments = action_params_;
 
   action_hub_pub_->publish(msg);
+  action_hub_pub_->on_deactivate();
 }
 
 std::string
@@ -266,13 +295,6 @@ ActionExecutor::get_params(const std::string & action_expr)
   }
 
   return ret;
-}
-
-void
-ActionExecutor::wait_timeout()
-{
-  RCLCPP_WARN(node_->get_logger(), "No action performer for %s. retrying", action_.c_str());
-  request_for_performers();
 }
 
 }  // namespace plansys2

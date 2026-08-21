@@ -15,8 +15,10 @@
 #ifndef PLANSYS2_EXECUTOR__ACTIONEXECUTOR_HPP_
 #define PLANSYS2_EXECUTOR__ACTIONEXECUTOR_HPP_
 
-#include <string>
+#include <chrono>
 #include <memory>
+#include <mutex>
+#include <string>
 #include <vector>
 
 #include "plansys2_msgs/msg/action.hpp"
@@ -63,18 +65,42 @@ public:
   bool is_finished();
 
   // Methods for debug
-  Status get_internal_status() const {return state_;}
-  void set_internal_status(Status state) {state_ = state;}
+  Status get_internal_status() const
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return state_;
+  }
+  void set_internal_status(Status state)
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    state_ = state;
+  }
   std::string get_action_name() const {return action_name_;}
   std::vector<std::string> get_action_params() const {return action_params_;}
   plansys2_msgs::msg::ActionExecution last_msg;
 
-  rclcpp::Time get_start_time() const {return start_execution_;}
+  rclcpp::Time get_start_time() const
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return start_execution_;
+  }
   rclcpp::Time get_current_time() const {return node_->now();}
-  rclcpp::Time get_status_time() const {return state_time_;}
+  rclcpp::Time get_status_time() const
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return state_time_;
+  }
 
-  std::string get_feedback() const {return feedback_;}
-  float get_completion() const {return completion_;}
+  std::string get_feedback() const
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return feedback_;
+  }
+  float get_completion() const
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    return completion_;
+  }
 
 protected:
   rclcpp_lifecycle::LifecycleNode::SharedPtr node_;
@@ -99,12 +125,13 @@ protected:
   void request_for_performers();
   void confirm_performer(const std::string & node_id);
   void reject_performer(const std::string & node_id);
+  BT::NodeStatus get_status_unlocked() const;
 
   std::string get_name(const std::string & action_expr);
   std::vector<std::string> get_params(const std::string & action_expr);
 
-  void wait_timeout();
-  rclcpp::TimerBase::SharedPtr waiting_timer_;
+  std::chrono::steady_clock::time_point last_request_time_;
+  mutable std::mutex state_mutex_;
 };
 
 struct ActionVariant

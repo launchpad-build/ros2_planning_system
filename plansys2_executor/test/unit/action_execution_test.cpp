@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <string>
-#include <vector>
-#include <regex>
-#include <iostream>
-#include <memory>
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <fstream>
+#include <iostream>
 #include <map>
+#include <memory>
+#include <mutex>
+#include <regex>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "ament_index_cpp/get_package_share_directory.hpp"
 
@@ -109,6 +114,188 @@ public:
   int executions_;
   int cycles_;
 };
+
+class ActionExecutorTestAdapter : public plansys2::ActionExecutor
+{
+public:
+  using Ptr = std::shared_ptr<ActionExecutorTestAdapter>;
+
+  static Ptr make_shared(
+    const std::string & action,
+    rclcpp_lifecycle::LifecycleNode::SharedPtr node)
+  {
+    return std::make_shared<ActionExecutorTestAdapter>(action, node);
+  }
+
+  ActionExecutorTestAdapter(
+    const std::string & action,
+    rclcpp_lifecycle::LifecycleNode::SharedPtr node)
+  : ActionExecutor(action, node)
+  {
+  }
+
+  void expire_retry_period()
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    last_request_time_ = std::chrono::steady_clock::now() - 2s;
+  }
+
+  void expire_dealing_timeout()
+  {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    state_time_ = node_->now() - rclcpp::Duration::from_seconds(31.0);
+  }
+};
+
+class ActionExecutorRetryTest : public testing::Test
+{
+protected:
+  using ActionExecution = plansys2_msgs::msg::ActionExecution;
+
+  void SetUp() override
+  {
+    test_node_ = rclcpp::Node::make_shared("action_executor_retry_test_node");
+    test_lf_node_ =
+      rclcpp_lifecycle::LifecycleNode::make_shared("action_executor_retry_test_lf_node");
+
+    action_hub_sub_ = test_node_->create_subscription<ActionExecution>(
+      "/actions_hub", rclcpp::QoS(100).reliable(),
+      [this](const ActionExecution::SharedPtr msg) {messages_.push_back(*msg);});
+    action_hub_pub_ = test_node_->create_publisher<ActionExecution>(
+      "/actions_hub", rclcpp::QoS(100).reliable());
+
+    executor_.add_node(test_node_);
+    executor_.add_node(test_lf_node_->get_node_base_interface());
+  }
+
+  ActionExecutorTestAdapter::Ptr make_action_executor()
+  {
+    auto action_executor = ActionExecutorTestAdapter::make_shared(
+      "(move r2d2 steering_wheels_zone assembly_zone)", test_lf_node_);
+    spin_some_for(100ms);
+    return action_executor;
+  }
+
+  void spin_some_for(std::chrono::milliseconds duration = 50ms)
+  {
+    const auto end = std::chrono::steady_clock::now() + duration;
+    do {
+      executor_.spin_some();
+      std::this_thread::sleep_for(1ms);
+    } while (std::chrono::steady_clock::now() < end);
+  }
+
+  void publish(
+    const ActionExecutorTestAdapter & action_executor,
+    int16_t type,
+    bool success = false)
+  {
+    ActionExecution msg;
+    msg.type = type;
+    msg.node_id = "performer";
+    msg.action = action_executor.get_action_name();
+    msg.arguments = action_executor.get_action_params();
+    msg.success = success;
+    msg.completion = success ? 1.0 : 0.0;
+    action_hub_pub_->publish(msg);
+    spin_some_for();
+  }
+
+  size_t count_messages(int16_t type) const
+  {
+    return std::count_if(
+      messages_.begin(), messages_.end(),
+      [type](const ActionExecution & msg) {return msg.type == type;});
+  }
+
+  rclcpp::Node::SharedPtr test_node_;
+  rclcpp_lifecycle::LifecycleNode::SharedPtr test_lf_node_;
+  rclcpp::Subscription<ActionExecution>::SharedPtr action_hub_sub_;
+  rclcpp::Publisher<ActionExecution>::SharedPtr action_hub_pub_;
+  std::vector<ActionExecution> messages_;
+  rclcpp::experimental::executors::EventsExecutor executor_;
+};
+
+TEST_F(ActionExecutorRetryTest, retry_is_driven_only_by_dealing_state)
+{
+  auto action_executor = make_action_executor();
+
+  ASSERT_EQ(action_executor->tick(test_node_->now()), BT::NodeStatus::RUNNING);
+  spin_some_for();
+  ASSERT_EQ(count_messages(ActionExecution::REQUEST), 1u);
+
+  action_executor->tick(test_node_->now());
+  spin_some_for();
+  ASSERT_EQ(count_messages(ActionExecution::REQUEST), 1u);
+
+  action_executor->expire_retry_period();
+  action_executor->tick(test_node_->now());
+  spin_some_for();
+  ASSERT_EQ(count_messages(ActionExecution::REQUEST), 2u);
+
+  action_executor->expire_dealing_timeout();
+  ASSERT_EQ(action_executor->tick(test_node_->now()), BT::NodeStatus::FAILURE);
+  action_executor->expire_retry_period();
+  action_executor->tick(test_node_->now());
+  spin_some_for();
+
+  EXPECT_EQ(
+    action_executor->get_internal_status(), plansys2::ActionExecutor::Status::FAILURE);
+  EXPECT_EQ(count_messages(ActionExecution::REQUEST), 2u);
+}
+
+TEST_F(ActionExecutorRetryTest, terminal_state_disarms_retry_and_next_action_dispatches)
+{
+  auto first_executor = make_action_executor();
+  auto second_executor = make_action_executor();
+
+  first_executor->tick(test_node_->now());
+  spin_some_for();
+  publish(*first_executor, ActionExecution::RESPONSE);
+  publish(*first_executor, ActionExecution::FINISH, true);
+
+  ASSERT_EQ(
+    first_executor->get_internal_status(), plansys2::ActionExecutor::Status::SUCCESS);
+  first_executor->expire_retry_period();
+  first_executor->tick(test_node_->now());
+  spin_some_for();
+  ASSERT_EQ(count_messages(ActionExecution::REQUEST), 1u);
+
+  second_executor->tick(test_node_->now());
+  spin_some_for();
+  publish(*second_executor, ActionExecution::RESPONSE);
+  publish(*second_executor, ActionExecution::FINISH, true);
+
+  EXPECT_EQ(
+    second_executor->get_internal_status(), plansys2::ActionExecutor::Status::SUCCESS);
+  EXPECT_EQ(count_messages(ActionExecution::REQUEST), 2u);
+  EXPECT_EQ(count_messages(ActionExecution::CONFIRM), 2u);
+  EXPECT_EQ(count_messages(ActionExecution::REJECT), 0u);
+}
+
+TEST_F(ActionExecutorRetryTest, cancellation_is_terminal_for_late_messages)
+{
+  auto action_executor = make_action_executor();
+
+  action_executor->tick(test_node_->now());
+  spin_some_for();
+  publish(*action_executor, ActionExecution::RESPONSE);
+  ASSERT_EQ(
+    action_executor->get_internal_status(), plansys2::ActionExecutor::Status::RUNNING);
+
+  action_executor->cancel();
+  spin_some_for();
+  publish(*action_executor, ActionExecution::FINISH, true);
+
+  action_executor->expire_retry_period();
+  action_executor->tick(test_node_->now());
+  spin_some_for();
+
+  EXPECT_EQ(
+    action_executor->get_internal_status(), plansys2::ActionExecutor::Status::CANCELLED);
+  EXPECT_EQ(count_messages(ActionExecution::REQUEST), 1u);
+  EXPECT_EQ(count_messages(ActionExecution::CANCEL), 1u);
+}
 
 TEST(action_execution, protocol_basic)
 {
