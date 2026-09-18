@@ -346,6 +346,39 @@ TEST(action_execution, protocol_cancelation)
   t.join();
 }
 
+TEST(action_execution, late_retry_after_finish)
+{
+  class TestExecutor : public plansys2::ActionExecutor
+  {
+public:
+    using ActionExecutor::ActionExecutor;
+    using ActionExecutor::action_hub_callback;
+    using ActionExecutor::action_hub_pub_;
+    using ActionExecutor::wait_timeout;
+  };
+
+  auto node = rclcpp_lifecycle::LifecycleNode::make_shared("late_retry_test");
+  TestExecutor executor("(move r2d2 steering_wheels_zone assembly_zone)", node);
+  executor.tick(node->now());
+
+  auto msg = std::make_shared<plansys2_msgs::msg::ActionExecution>();
+  msg->type = plansys2_msgs::msg::ActionExecution::RESPONSE;
+  msg->action = executor.get_action_name();
+  msg->arguments = executor.get_action_params();
+  msg->node_id = "move_action";
+  executor.action_hub_callback(msg);
+  ASSERT_EQ(executor.get_internal_status(), plansys2::ActionExecutor::RUNNING);
+
+  msg->type = plansys2_msgs::msg::ActionExecution::FINISH;
+  msg->success = true;
+  executor.action_hub_callback(msg);
+
+  // A timer callback may already be queued when completion deactivates publishing.
+  executor.wait_timeout();
+  EXPECT_EQ(executor.get_internal_status(), plansys2::ActionExecutor::SUCCESS);
+  EXPECT_FALSE(executor.action_hub_pub_->is_activated());
+}
+
 int main(int argc, char ** argv)
 {
   testing::InitGoogleTest(&argc, argv);
