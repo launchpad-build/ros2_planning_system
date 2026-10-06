@@ -429,6 +429,7 @@ TEST(executor, action_executor)
     std::cerr << "pluginlib error: " << std::string(ex.what()) << std::endl;
   }
 
+  bt_builder->setClients(domain_client, problem_client);
   bt_builder->initialize();
   auto tree_str = bt_builder->get_tree(plan.value());
 

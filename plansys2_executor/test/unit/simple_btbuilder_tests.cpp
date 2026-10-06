@@ -340,6 +340,8 @@ TEST(simple_btbuilder_tests, test_plan_1)
   auto domain_client = std::make_shared<plansys2::DomainExpertClient>();
 
   auto btbuilder = std::make_shared<SimpleBTBuilderTest>();
+  btbuilder->setClients(domain_client, problem_client);
+  btbuilder->initialize();
 
   std::string pkgpath = ament_index_cpp::get_package_share_directory("plansys2_executor");
 
@@ -580,6 +582,8 @@ TEST(simple_btbuilder_tests, test_plan_2)
   auto domain_client = std::make_shared<plansys2::DomainExpertClient>();
 
   auto btbuilder = std::make_shared<SimpleBTBuilderTest>();
+  btbuilder->setClients(domain_client, problem_client);
+  btbuilder->initialize();
 
   std::string pkgpath = ament_index_cpp::get_package_share_directory("plansys2_executor");
 
@@ -786,6 +790,8 @@ TEST(simple_btbuilder_tests, test_plan_3)
   auto domain_client = std::make_shared<plansys2::DomainExpertClient>();
 
   auto btbuilder = std::make_shared<SimpleBTBuilderTest>();
+  btbuilder->setClients(domain_client, problem_client);
+  btbuilder->initialize();
 
   std::string pkgpath = ament_index_cpp::get_package_share_directory("plansys2_executor");
 
@@ -877,6 +883,8 @@ TEST(simple_btbuilder_tests, test_plan_4)
   auto domain_client = std::make_shared<plansys2::DomainExpertClient>();
 
   auto btbuilder = std::make_shared<SimpleBTBuilderTest>();
+  btbuilder->setClients(domain_client, problem_client);
+  btbuilder->initialize();
 
   std::string pkgpath = ament_index_cpp::get_package_share_directory("plansys2_executor");
 
@@ -994,6 +1002,8 @@ TEST(simple_btbuilder_tests, test_plan_5)
   auto domain_client = std::make_shared<plansys2::DomainExpertClient>();
 
   auto btbuilder = std::make_shared<SimpleBTBuilderTest>();
+  btbuilder->setClients(domain_client, problem_client);
+  btbuilder->initialize();
 
   std::string pkgpath = ament_index_cpp::get_package_share_directory("plansys2_executor");
 
@@ -1106,6 +1116,8 @@ TEST(simple_btbuilder_tests, test_plan_6)
   auto domain_client = std::make_shared<plansys2::DomainExpertClient>();
 
   auto btbuilder = std::make_shared<SimpleBTBuilderTest>();
+  btbuilder->setClients(domain_client, problem_client);
+  btbuilder->initialize();
 
   std::string pkgpath = ament_index_cpp::get_package_share_directory("plansys2_executor");
 
