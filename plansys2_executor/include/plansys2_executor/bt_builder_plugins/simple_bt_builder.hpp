@@ -122,6 +122,11 @@ protected:
     const plansys2_msgs::msg::Tree & requirement,
     const ActionNode::Ptr & node,
     const ActionNode::Ptr & current);
+  ActionNode::Ptr get_node_satisfy(
+    const plansys2_msgs::msg::Tree & requirement,
+    const ActionNode::Ptr & node,
+    const ActionNode::Ptr & current,
+    std::map<ActionNode::Ptr, ActionNode::Ptr> & cache);
   std::list<ActionNode::Ptr> get_node_contradict(
     const ActionGraph::Ptr & graph,
     const ActionNode::Ptr & current);

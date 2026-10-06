@@ -242,6 +242,17 @@ protected:
     return plan;
   }
 
+  plansys2::ActionNode::Ptr mark_node(const std::string & destination)
+  {
+    plansys2_msgs::msg::Plan plan;
+    plansys2_msgs::msg::PlanItem item;
+    item.action = "(mark " + destination + ")";
+    plan.items.push_back(item);
+    auto node = plansys2::ActionNode::make_shared();
+    node->action = builder_.get_plan_actions(plan).front();
+    return node;
+  }
+
   void expect_node_states(const plansys2::ActionGraph::Ptr & graph, double initial_moves)
   {
     ASSERT_NE(graph, nullptr);
@@ -252,7 +263,7 @@ protected:
       ASSERT_EQ(node->functions.size(), 1u);
       EXPECT_DOUBLE_EQ(node->functions.front().value, initial_moves + i);
       EXPECT_TRUE(plansys2::check(
-          plansys2::Goal("(ready item " + from + ")"), node->predicates, node->functions));
+          plansys2::Goal("(and (ready item " + from + "))"), node->predicates, node->functions));
       const auto params = node->action.action.get_action_params();
       ASSERT_EQ(params.size(), 3u);
       EXPECT_EQ(params[2].name, destinations_[i]);
@@ -326,6 +337,40 @@ TEST_F(SimpleBTBuilderSnapshotTest, GroundsInstantAndRepeatedDurativeActionsWith
         "(placed item " + destinations_[i] + ")"), std::string::npos);
     from = destinations_[i];
   }
+}
+
+TEST_F(SimpleBTBuilderSnapshotTest, SharedPathsPreserveTheLastMatchingPredecessor)
+{
+  auto first = mark_node("pallet1");
+  auto second = mark_node("pallet1");
+  auto shared = mark_node("pallet1");
+  first->out_arcs = {shared};
+  second->out_arcs = {shared};
+  auto graph = plansys2::ActionGraph::make_shared();
+  graph->roots = {first, second};
+  const auto requirement = plansys2::Goal("(and (marked pallet1))");
+
+  EXPECT_EQ(builder_.get_node_satisfy(requirement, graph, nullptr), shared);
+  EXPECT_EQ(builder_.get_node_satisfy(requirement, first, nullptr), shared);
+  EXPECT_EQ(builder_.get_node_satisfy(requirement, graph, shared), second);
+}
+
+TEST_F(SimpleBTBuilderSnapshotTest, RequirementSearchesSeeChangedActionsAndState)
+{
+  auto node = mark_node("pallet1");
+  auto graph = plansys2::ActionGraph::make_shared();
+  graph->roots = {node};
+  const auto first_requirement = plansys2::Goal("(and (marked pallet1))");
+  const auto second_requirement = plansys2::Goal("(and (marked pallet2))");
+
+  EXPECT_EQ(builder_.get_node_satisfy(first_requirement, graph, nullptr), node);
+  EXPECT_EQ(builder_.get_node_satisfy(second_requirement, graph, nullptr), nullptr);
+
+  node->action = mark_node("pallet2")->action;
+  EXPECT_EQ(builder_.get_node_satisfy(second_requirement, graph, nullptr), node);
+
+  node->predicates = {plansys2::Predicate("(marked pallet2)")};
+  EXPECT_EQ(builder_.get_node_satisfy(second_requirement, graph, nullptr), nullptr);
 }
 
 TEST(simple_btbuilder_tests, test_plan_1)

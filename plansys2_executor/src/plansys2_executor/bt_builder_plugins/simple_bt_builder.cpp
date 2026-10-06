@@ -93,8 +93,24 @@ SimpleBTBuilder::get_node_satisfy(
   const ActionNode::Ptr & node,
   const ActionNode::Ptr & current)
 {
+  std::map<ActionNode::Ptr, ActionNode::Ptr> cache;
+  return get_node_satisfy(requirement, node, current, cache);
+}
+
+ActionNode::Ptr
+SimpleBTBuilder::get_node_satisfy(
+  const plansys2_msgs::msg::Tree & requirement,
+  const ActionNode::Ptr & node,
+  const ActionNode::Ptr & current,
+  std::map<ActionNode::Ptr, ActionNode::Ptr> & cache)
+{
   if (node == current) {
     return nullptr;
+  }
+
+  const auto cached = cache.find(node);
+  if (cached != cache.end()) {
+    return cached->second;
   }
 
   ActionNode::Ptr ret = nullptr;
@@ -121,13 +137,14 @@ SimpleBTBuilder::get_node_satisfy(
 
   // Traverse the rest of the graph.
   for (const auto & arc : node->out_arcs) {
-    auto node_ret = get_node_satisfy(requirement, arc, current);
+    auto node_ret = get_node_satisfy(requirement, arc, current, cache);
 
     if (node_ret != nullptr) {
       ret = node_ret;
     }
   }
 
+  cache.emplace(node, ret);
   return ret;
 }
 
@@ -210,9 +227,11 @@ SimpleBTBuilder::get_node_satisfy(
   const ActionGraph::Ptr & graph,
   const ActionNode::Ptr & current)
 {
+  // The graph changes between requirement searches; share results only within this search.
+  std::map<ActionNode::Ptr, ActionNode::Ptr> cache;
   ActionNode::Ptr ret;
   for (const auto & root : graph->roots) {
-    auto node_satisfy = get_node_satisfy(requirement, root, current);
+    auto node_satisfy = get_node_satisfy(requirement, root, current, cache);
     if (node_satisfy != nullptr) {
       ret = node_satisfy;
     }

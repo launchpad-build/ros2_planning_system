@@ -168,6 +168,7 @@ TEST(executiotest_noden_tree, bt_builder_factory)
     std::cerr << "pluginlib error: " << std::string(ex.what()) << std::endl;
   }
 
+  bt_builder->setClients(domain_client, problem_client);
   bt_builder->initialize();
   auto tree_str = bt_builder->get_tree(plan.value());
 
@@ -310,6 +311,7 @@ TEST(executiotest_noden_tree, bt_builder_factory_2)
     std::cerr << "pluginlib error: " << std::string(ex.what()) << std::endl;
   }
 
+  bt_builder->setClients(domain_client, problem_client);
   bt_builder->initialize();
   auto tree_str = bt_builder->get_tree(plan.value());
 
@@ -441,6 +443,7 @@ TEST(executiotest_noden_tree, bt_builder_factory_3)
     std::cerr << "pluginlib error: " << std::string(ex.what()) << std::endl;
   }
 
+  bt_builder->setClients(domain_client, problem_client);
   bt_builder->initialize();
   auto tree_str = bt_builder->get_tree(plan.value());
 
