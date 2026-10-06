@@ -84,7 +84,7 @@ ActionExecutor::action_hub_callback(const plansys2_msgs::msg::ActionExecution::S
 
       break;
     case plansys2_msgs::msg::ActionExecution::FINISH:
-      if (msg->arguments == action_params_ &&
+      if (state_ == RUNNING && msg->arguments == action_params_ &&
         msg->action == action_name_ && msg->node_id == current_performer_id_)
       {
         if (msg->success) {
@@ -99,8 +99,6 @@ ActionExecutor::action_hub_callback(const plansys2_msgs::msg::ActionExecution::S
         state_time_ = node_->now();
 
         action_hub_pub_->on_deactivate();
-        action_hub_pub_ = nullptr;
-        action_hub_sub_ = nullptr;
       }
       break;
     default:

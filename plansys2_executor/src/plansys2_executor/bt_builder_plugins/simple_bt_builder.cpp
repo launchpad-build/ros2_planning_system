@@ -93,8 +93,24 @@ SimpleBTBuilder::get_node_satisfy(
   const ActionNode::Ptr & node,
   const ActionNode::Ptr & current)
 {
+  std::map<ActionNode::Ptr, ActionNode::Ptr> cache;
+  return get_node_satisfy(requirement, node, current, cache);
+}
+
+ActionNode::Ptr
+SimpleBTBuilder::get_node_satisfy(
+  const plansys2_msgs::msg::Tree & requirement,
+  const ActionNode::Ptr & node,
+  const ActionNode::Ptr & current,
+  std::map<ActionNode::Ptr, ActionNode::Ptr> & cache)
+{
   if (node == current) {
     return nullptr;
+  }
+
+  const auto cached = cache.find(node);
+  if (cached != cache.end()) {
+    return cached->second;
   }
 
   ActionNode::Ptr ret = nullptr;
@@ -121,13 +137,14 @@ SimpleBTBuilder::get_node_satisfy(
 
   // Traverse the rest of the graph.
   for (const auto & arc : node->out_arcs) {
-    auto node_ret = get_node_satisfy(requirement, arc, current);
+    auto node_ret = get_node_satisfy(requirement, arc, current, cache);
 
     if (node_ret != nullptr) {
       ret = node_ret;
     }
   }
 
+  cache.emplace(node, ret);
   return ret;
 }
 
@@ -210,9 +227,11 @@ SimpleBTBuilder::get_node_satisfy(
   const ActionGraph::Ptr & graph,
   const ActionNode::Ptr & current)
 {
+  // The graph changes between requirement searches; share results only within this search.
+  std::map<ActionNode::Ptr, ActionNode::Ptr> cache;
   ActionNode::Ptr ret;
   for (const auto & root : graph->roots) {
-    auto node_satisfy = get_node_satisfy(requirement, root, current);
+    auto node_satisfy = get_node_satisfy(requirement, root, current, cache);
     if (node_satisfy != nullptr) {
       ret = node_satisfy;
     }
@@ -346,8 +365,10 @@ SimpleBTBuilder::get_graph(const plansys2_msgs::msg::Plan & current_plan)
   auto graph = ActionGraph::make_shared();
 
   auto action_sequence = get_plan_actions(current_plan);
-  auto predicates = problem_client_->getPredicates();
-  auto functions = problem_client_->getFunctions();
+  const auto initial_predicates = problem_client_->getPredicates();
+  const auto initial_functions = problem_client_->getFunctions();
+  auto predicates = initial_predicates;
+  auto functions = initial_functions;
 
   // Get root actions that can be run in parallel
   graph->roots = get_roots(action_sequence, predicates, functions, node_counter);
@@ -436,8 +457,8 @@ SimpleBTBuilder::get_graph(const plansys2_msgs::msg::Plan & current_plan)
     // Compute the state up to the new node
     // The effects of the new node are not applied
     std::list<ActionNode::Ptr> used_nodes;
-    predicates = problem_client_->getPredicates();
-    functions = problem_client_->getFunctions();
+    predicates = initial_predicates;
+    functions = initial_functions;
     get_state(new_node, used_nodes, predicates, functions);
     new_node->predicates = predicates;
     new_node->functions = functions;
@@ -466,9 +487,8 @@ SimpleBTBuilder::get_tree(const plansys2_msgs::msg::Plan & current_plan)
 {
   graph_ = get_graph(current_plan);
 
-  // If graph was not generated, return an empty string.
-  // This can be used to fails the serveice call
-  if (!graph_) {
+  // An invalid or empty graph cannot produce a flow tree; fail the service call.
+  if (!graph_ || graph_->roots.empty()) {
     return "";
   }
 
@@ -832,13 +852,16 @@ std::vector<ActionStamped>
 SimpleBTBuilder::get_plan_actions(const plansys2_msgs::msg::Plan & plan)
 {
   std::vector<ActionStamped> ret;
+  if (plan.items.empty()) {
+    return ret;
+  }
+  const auto actions = domain_client_->getActions();
 
   for (auto & item : plan.items) {
     ActionStamped action_stamped;
 
     action_stamped.time = item.time;
     action_stamped.duration = item.duration;
-    auto actions = domain_client_->getActions();
     if (std::find(actions.begin(), actions.end(), get_action_name(item.action)) != actions.end()) {
       action_stamped.action.action =
         domain_client_->getAction(

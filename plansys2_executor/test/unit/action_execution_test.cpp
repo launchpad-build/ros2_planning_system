@@ -346,6 +346,60 @@ TEST(action_execution, protocol_cancelation)
   t.join();
 }
 
+TEST(action_execution, late_retry_after_finish)
+{
+  class TestExecutor : public plansys2::ActionExecutor
+  {
+public:
+    using ActionExecutor::ActionExecutor;
+    using ActionExecutor::action_hub_callback;
+    using ActionExecutor::action_hub_pub_;
+    using ActionExecutor::wait_timeout;
+  };
+
+  auto node = rclcpp_lifecycle::LifecycleNode::make_shared("late_retry_test");
+  TestExecutor executor("(move r2d2 steering_wheels_zone assembly_zone)", node);
+  executor.tick(node->now());
+
+  auto msg = std::make_shared<plansys2_msgs::msg::ActionExecution>();
+  msg->type = plansys2_msgs::msg::ActionExecution::RESPONSE;
+  msg->action = executor.get_action_name();
+  msg->arguments = executor.get_action_params();
+  msg->node_id = "move_action";
+  executor.action_hub_callback(msg);
+  ASSERT_EQ(executor.get_internal_status(), plansys2::ActionExecutor::RUNNING);
+
+  msg->type = plansys2_msgs::msg::ActionExecution::FINISH;
+  msg->success = true;
+  msg->status = "completed";
+  msg->completion = 1.0;
+  executor.action_hub_callback(msg);
+
+  const auto finished_at = executor.get_status_time();
+  // A later identical action from this performer must not replace this result.
+  msg->success = false;
+  msg->status = "later action failed";
+  msg->completion = 0.25;
+  executor.action_hub_callback(msg);
+  EXPECT_EQ(executor.get_internal_status(), plansys2::ActionExecutor::SUCCESS);
+  EXPECT_EQ(executor.get_feedback(), "completed");
+  EXPECT_FLOAT_EQ(executor.get_completion(), 1.0F);
+  EXPECT_EQ(executor.get_status_time().nanoseconds(), finished_at.nanoseconds());
+
+  // A timer callback may already be queued when completion deactivates publishing.
+  executor.wait_timeout();
+  EXPECT_EQ(executor.get_internal_status(), plansys2::ActionExecutor::SUCCESS);
+  EXPECT_FALSE(executor.action_hub_pub_->is_activated());
+
+  executor.cancel();
+  msg->success = true;
+  executor.action_hub_callback(msg);
+  EXPECT_EQ(executor.get_internal_status(), plansys2::ActionExecutor::CANCELLED);
+  EXPECT_EQ(executor.get_feedback(), "completed");
+  EXPECT_FLOAT_EQ(executor.get_completion(), 1.0F);
+  EXPECT_EQ(executor.get_status_time().nanoseconds(), finished_at.nanoseconds());
+}
+
 int main(int argc, char ** argv)
 {
   testing::InitGoogleTest(&argc, argv);

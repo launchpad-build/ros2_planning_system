@@ -296,6 +296,7 @@ ComputeBT::computeBTCallback(
   std::shared_ptr<plansys2::BTBuilder> bt_builder;
   try {
     bt_builder = bt_builder_loader_.createSharedInstance("plansys2::" + bt_builder_plugin);
+    bt_builder->setClients(domain_client_, problem_client_);
   } catch (pluginlib::PluginlibException & ex) {
     RCLCPP_ERROR(get_logger(), "pluginlib error: %s", ex.what());
   }
