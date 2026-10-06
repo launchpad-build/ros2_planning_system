@@ -17,6 +17,7 @@
 #include <regex>
 #include <iostream>
 #include <memory>
+#include <array>
 #include <fstream>
 #include <map>
 #include <set>
@@ -27,6 +28,7 @@
 
 #include "plansys2_domain_expert/DomainExpertNode.hpp"
 #include "plansys2_domain_expert/DomainExpertClient.hpp"
+#include "plansys2_domain_expert/DomainExpert.hpp"
 #include "plansys2_executor/bt_builder_plugins/simple_bt_builder.hpp"
 #include "plansys2_problem_expert/ProblemExpertNode.hpp"
 #include "plansys2_problem_expert/ProblemExpertClient.hpp"
@@ -134,6 +136,197 @@ public:
     SimpleBTBuilder::remove_existing_requirements(requirements, predicates, functions);
   }
 };
+
+class CountingProblemClient : public plansys2::ProblemExpertClient
+{
+public:
+  std::vector<plansys2::Predicate> getPredicates() override
+  {
+    ++predicate_reads;
+    return predicates;
+  }
+
+  std::vector<plansys2::Function> getFunctions() override
+  {
+    ++function_reads;
+    return functions;
+  }
+
+  unsigned predicate_reads = 0;
+  unsigned function_reads = 0;
+  std::vector<plansys2::Predicate> predicates;
+  std::vector<plansys2::Function> functions;
+};
+
+class CountingDomainClient : public plansys2::DomainExpertClient
+{
+public:
+  CountingDomainClient()
+  : domain_(R"(
+    (define (domain destinations)
+      (:requirements :strips :typing :fluents :durative-actions)
+      (:types unit destination)
+      (:predicates
+        (ready ?u - unit ?d - destination)
+        (placed ?u - unit ?d - destination)
+        (marked ?d - destination))
+      (:functions (moves ?u - unit))
+      (:action mark
+        :parameters (?d - destination)
+        :precondition (and)
+        :effect (marked ?d))
+      (:durative-action drop
+        :parameters (?u - unit ?from ?to - destination)
+        :duration (= ?duration 1)
+        :condition (at start (ready ?u ?from))
+        :effect (and
+          (at start (not (ready ?u ?from)))
+          (at end (ready ?u ?to))
+          (at end (placed ?u ?to))
+          (at end (increase (moves ?u) 1))))
+    ))") {}
+
+  std::vector<std::string> getActions() override
+  {
+    ++action_list_reads;
+    return domain_.getActions();
+  }
+
+  plansys2_msgs::msg::Action::SharedPtr getAction(
+    const std::string & name, const std::vector<std::string> & params) override
+  {
+    ++instant_groundings;
+    return domain_.getAction(name, params);
+  }
+
+  plansys2_msgs::msg::DurativeAction::SharedPtr getDurativeAction(
+    const std::string & name, const std::vector<std::string> & params) override
+  {
+    ++durative_groundings;
+    return domain_.getDurativeAction(name, params);
+  }
+
+  unsigned action_list_reads = 0;
+  unsigned instant_groundings = 0;
+  unsigned durative_groundings = 0;
+
+private:
+  plansys2::DomainExpert domain_;
+};
+
+class SimpleBTBuilderSnapshotTest : public testing::Test
+{
+protected:
+  void SetUp() override
+  {
+    domain_ = std::make_shared<CountingDomainClient>();
+    problem_ = std::make_shared<CountingProblemClient>();
+    problem_->predicates = {plansys2::Predicate("(ready item origin)")};
+    problem_->functions = {plansys2::Function("(= (moves item) 0)")};
+    builder_.setClients(domain_, problem_);
+    builder_.initialize();
+  }
+
+  plansys2_msgs::msg::Plan drop_plan() const
+  {
+    plansys2_msgs::msg::Plan plan;
+    std::string from = "origin";
+    for (size_t i = 0; i < destinations_.size(); ++i) {
+      plansys2_msgs::msg::PlanItem item;
+      item.time = static_cast<float>(i);
+      item.duration = 1.0;
+      item.action = "(drop item " + from + " " + destinations_[i] + ")";
+      plan.items.push_back(item);
+      from = destinations_[i];
+    }
+    return plan;
+  }
+
+  void expect_node_states(const plansys2::ActionGraph::Ptr & graph, double initial_moves)
+  {
+    ASSERT_NE(graph, nullptr);
+    ASSERT_EQ(graph->roots.size(), 1u);
+    auto node = graph->roots.front();
+    std::string from = "origin";
+    for (size_t i = 0; i < destinations_.size(); ++i) {
+      ASSERT_EQ(node->functions.size(), 1u);
+      EXPECT_DOUBLE_EQ(node->functions.front().value, initial_moves + i);
+      EXPECT_TRUE(plansys2::check(
+          plansys2::Goal("(ready item " + from + ")"), node->predicates, node->functions));
+      const auto params = node->action.action.get_action_params();
+      ASSERT_EQ(params.size(), 3u);
+      EXPECT_EQ(params[2].name, destinations_[i]);
+      if (i + 1 < destinations_.size()) {
+        ASSERT_EQ(node->out_arcs.size(), 1u);
+        node = node->out_arcs.front();
+      } else {
+        EXPECT_TRUE(node->out_arcs.empty());
+      }
+      from = destinations_[i];
+    }
+  }
+
+  const std::array<std::string, 4> destinations_ = {"pallet1", "pallet2", "pallet3", "pallet4"};
+  std::shared_ptr<CountingDomainClient> domain_;
+  std::shared_ptr<CountingProblemClient> problem_;
+  SimpleBTBuilderTest builder_;
+};
+
+TEST_F(SimpleBTBuilderSnapshotTest, ReadsOneInitialStateAndReplaysEachAncestorsEffectsOnce)
+{
+  const auto plan = drop_plan();
+  expect_node_states(builder_.get_graph(plan), 0.0);
+  EXPECT_EQ(problem_->predicate_reads, 1u);
+  EXPECT_EQ(problem_->function_reads, 1u);
+  EXPECT_EQ(domain_->action_list_reads, 1u);
+
+  // A second build must see new numeric state, not the previous build's simulation.
+  problem_->functions = {plansys2::Function("(= (moves item) 10)")};
+  expect_node_states(builder_.get_graph(plan), 10.0);
+  EXPECT_EQ(problem_->predicate_reads, 2u);
+  EXPECT_EQ(problem_->function_reads, 2u);
+  EXPECT_EQ(domain_->action_list_reads, 2u);
+
+  // Removing the initial location makes the same plan invalid on the next build.
+  problem_->predicates.clear();
+  EXPECT_EQ(builder_.get_graph(plan), nullptr);
+  EXPECT_EQ(problem_->predicate_reads, 3u);
+  EXPECT_EQ(problem_->function_reads, 3u);
+}
+
+TEST_F(SimpleBTBuilderSnapshotTest, GroundsInstantAndRepeatedDurativeActionsWithTheirOwnParameters)
+{
+  EXPECT_TRUE(builder_.get_plan_actions(plansys2_msgs::msg::Plan{}).empty());
+  EXPECT_TRUE(builder_.get_tree(plansys2_msgs::msg::Plan{}).empty());
+  EXPECT_EQ(domain_->action_list_reads, 0u);
+  auto plan = drop_plan();
+  plansys2_msgs::msg::PlanItem mark;
+  mark.action = "(mark pallet4)";
+  plan.items.insert(plan.items.begin(), mark);
+
+  const auto actions = builder_.get_plan_actions(plan);
+  ASSERT_EQ(actions.size(), 5u);
+  EXPECT_EQ(domain_->action_list_reads, 1u);
+  EXPECT_EQ(domain_->instant_groundings, 1u);
+  EXPECT_EQ(domain_->durative_groundings, 4u);
+  EXPECT_FALSE(actions.front().action.is_durative_action());
+  ASSERT_EQ(actions.front().action.get_action_params().size(), 1u);
+  EXPECT_EQ(actions.front().action.get_action_params().front().name, "pallet4");
+  std::string from = "origin";
+  for (size_t i = 0; i < destinations_.size(); ++i) {
+    const auto & action = actions[i + 1].action;
+    EXPECT_TRUE(action.is_durative_action());
+    const auto params = action.get_action_params();
+    ASSERT_EQ(params.size(), 3u);
+    EXPECT_EQ(params[0].name, "item");
+    EXPECT_EQ(params[1].name, from);
+    EXPECT_EQ(params[2].name, destinations_[i]);
+    EXPECT_NE(
+      parser::pddl::toString(action.get_at_end_effects()).find(
+        "(placed item " + destinations_[i] + ")"), std::string::npos);
+    from = destinations_[i];
+  }
+}
 
 TEST(simple_btbuilder_tests, test_plan_1)
 {

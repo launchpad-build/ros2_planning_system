@@ -371,12 +371,33 @@ public:
 
   msg->type = plansys2_msgs::msg::ActionExecution::FINISH;
   msg->success = true;
+  msg->status = "completed";
+  msg->completion = 1.0;
   executor.action_hub_callback(msg);
+
+  const auto finished_at = executor.get_status_time();
+  // A later identical action from this performer must not replace this result.
+  msg->success = false;
+  msg->status = "later action failed";
+  msg->completion = 0.25;
+  executor.action_hub_callback(msg);
+  EXPECT_EQ(executor.get_internal_status(), plansys2::ActionExecutor::SUCCESS);
+  EXPECT_EQ(executor.get_feedback(), "completed");
+  EXPECT_FLOAT_EQ(executor.get_completion(), 1.0F);
+  EXPECT_EQ(executor.get_status_time().nanoseconds(), finished_at.nanoseconds());
 
   // A timer callback may already be queued when completion deactivates publishing.
   executor.wait_timeout();
   EXPECT_EQ(executor.get_internal_status(), plansys2::ActionExecutor::SUCCESS);
   EXPECT_FALSE(executor.action_hub_pub_->is_activated());
+
+  executor.cancel();
+  msg->success = true;
+  executor.action_hub_callback(msg);
+  EXPECT_EQ(executor.get_internal_status(), plansys2::ActionExecutor::CANCELLED);
+  EXPECT_EQ(executor.get_feedback(), "completed");
+  EXPECT_FLOAT_EQ(executor.get_completion(), 1.0F);
+  EXPECT_EQ(executor.get_status_time().nanoseconds(), finished_at.nanoseconds());
 }
 
 int main(int argc, char ** argv)

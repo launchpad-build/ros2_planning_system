@@ -15,6 +15,7 @@
 #include <filesystem>
 
 #include <algorithm>
+#include <chrono>
 #include <string>
 #include <memory>
 #include <iostream>
@@ -291,8 +292,11 @@ ExecutorNode::getOrderedSubGoals()
     }
   }
 
+  if (current_plan_->items.empty()) {
+    return ordered_goals;
+  }
+  const auto actions = domain_client_->getActions();
   for (const auto & plan_item : current_plan_.value().items) {
-    auto actions = domain_client_->getActions();
     std::string action_name = get_action_name(plan_item.action);
     if (std::find(actions.begin(), actions.end(), action_name) != actions.end()) {
       std::shared_ptr<plansys2_msgs::msg::Action> action =
@@ -384,8 +388,11 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
 
   executing_plan_pub_->publish(current_plan_.value());
 
+  const auto preparation_started = std::chrono::steady_clock::now();
   auto action_map = std::make_shared<std::map<std::string, ActionExecutionInfo>>();
   auto action_timeout_actions = this->get_parameter("action_timeouts.actions").as_string_array();
+  const auto actions = current_plan_->items.empty() ? std::vector<std::string>{} :
+    domain_client_->getActions();
 
   (*action_map)[":0"] = ActionExecutionInfo();
   (*action_map)[":0"].action_executor = ActionExecutor::make_shared("(INIT)", shared_from_this());
@@ -401,7 +408,6 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
     (*action_map)[index].action_executor =
       ActionExecutor::make_shared(plan_item.action, shared_from_this());
         
-    auto actions = domain_client_->getActions();
     std::string action_name_ = get_action_name(plan_item.action);
     if (std::find(actions.begin(), actions.end(), action_name_) != actions.end()) {
       (*action_map)[index].action_info = domain_client_->getAction(
@@ -426,7 +432,9 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
       (*action_map)[index].duration_overrun_percentage);
   }
 
+  const auto action_setup_finished = std::chrono::steady_clock::now();
   ordered_sub_goals_ = getOrderedSubGoals();
+  const auto subgoals_finished = std::chrono::steady_clock::now();
 
   auto bt_builder_plugin = this->get_parameter("bt_builder_plugin").as_string();
   if (bt_builder_plugin.empty()) {
@@ -435,11 +443,7 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
 
   std::shared_ptr<plansys2::BTBuilder> bt_builder;
   try {
-    RCLCPP_INFO(
-      get_logger(), "Before bt");
     bt_builder = bt_builder_loader_.createSharedInstance("plansys2::" + bt_builder_plugin);
-    RCLCPP_INFO(
-      get_logger(), "After bt built new");
     
     // Set existing clients to prevent duplicates
     bt_builder->setClients(domain_client_, problem_client_);
@@ -458,7 +462,9 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
     // bt_builder->initialize(start_action_bt_xml_, end_action_bt_xml_, precision);
   }
 
+  const auto graph_started = std::chrono::steady_clock::now();
   auto bt_xml_tree = bt_builder->get_tree(current_plan_.value());
+  const auto graph_finished = std::chrono::steady_clock::now();
   if (bt_xml_tree.empty()) {
     RCLCPP_ERROR(get_logger(), "Error computing behavior tree!");
 
@@ -504,7 +510,22 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
   blackboard->set("problem_client", problem_client_);
   blackboard->set("bt_builder", bt_builder);
 
+  const auto tree_started = std::chrono::steady_clock::now();
   auto tree = factory.createTreeFromText(bt_xml_tree, blackboard);
+  const auto tree_ready = std::chrono::steady_clock::now();
+  const auto elapsed_ms = [](auto start, auto end) {
+      return std::chrono::duration<double, std::milli>(end - start).count();
+    };
+  RCLCPP_INFO(
+    get_logger(),
+    "Plan preparation (%zu actions): action setup %.1f ms, ordered subgoals %.1f ms, "
+    "graph/XML %.1f ms, tree creation %.1f ms, total %.1f ms",
+    current_plan_->items.size(),
+    elapsed_ms(preparation_started, action_setup_finished),
+    elapsed_ms(action_setup_finished, subgoals_finished),
+    elapsed_ms(graph_started, graph_finished),
+    elapsed_ms(tree_started, tree_ready),
+    elapsed_ms(preparation_started, tree_ready));
 
   auto info_pub = create_wall_timer(
     1s, [this, &action_map]() {
@@ -516,6 +537,8 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
 
   rclcpp::Rate rate(10);
   auto status = BT::NodeStatus::RUNNING;
+  const auto first_tick_started = std::chrono::steady_clock::now();
+  bool first_tick_reported = false;
 
   while (status == BT::NodeStatus::RUNNING && !cancel_plan_requested_) {
     try {
@@ -523,6 +546,14 @@ ExecutorNode::execute(const std::shared_ptr<GoalHandleExecutePlan> goal_handle)
     } catch (std::exception & e) {
       std::cerr << e.what() << std::endl;
       status = BT::NodeStatus::FAILURE;
+    }
+    if (!first_tick_reported) {
+      const auto first_tick_finished = std::chrono::steady_clock::now();
+      RCLCPP_INFO(
+        get_logger(), "First plan tick %.1f ms; execution preparation to first tick %.1f ms",
+        elapsed_ms(first_tick_started, first_tick_finished),
+        elapsed_ms(preparation_started, first_tick_finished));
+      first_tick_reported = true;
     }
 
     feedback->action_execution_status = get_feedback_info(action_map);
